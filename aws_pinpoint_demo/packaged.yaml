@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'aws_pinpoint_demo
+
+  an application to demo aws pinpoint along with lambda & kinesis integrations
+
+  '
+Resources:
+  AWSPinpointApplication:
+    Type: AWS::Pinpoint::App
+    Properties:
+      Name: aws_pinpoint_demo
+Outputs:
+  AWSPinpointApplication:
+    Description: API Gateway endpoint URL for Prod stage for Hello World function
+    Value:
+      Fn::GetAtt:
+      - AWSPinpointApplication
+      - Arn
