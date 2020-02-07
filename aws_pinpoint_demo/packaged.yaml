@@ -5,11 +5,25 @@ Description: 'aws_pinpoint_demo
   an application to demo aws pinpoint along with lambda & kinesis integrations
 
   '
+Parameters:
+  EmailChannelAddress:
+    Type: String
+  EmailChannelIdentityArn:
+    Type: String
 Resources:
   AWSPinpointApplication:
     Type: AWS::Pinpoint::App
     Properties:
       Name: aws_pinpoint_demo
+  AWSPinpointEmailChannel:
+    Type: AWS::Pinpoint::EmailChannel
+    Properties:
+      ApplicationId:
+        Ref: AWSPinpointApplication
+      FromAddress:
+        Ref: EmailChannelAddress
+      Identity:
+        Ref: EmailChannelIdentityArn
 Outputs:
   AWSPinpointApplication:
     Description: API Gateway endpoint URL for Prod stage for Hello World function

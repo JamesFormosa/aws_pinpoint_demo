@@ -1,42 +1,39 @@
+import boto3
 import json
 
-# import requests
-
-
 def lambda_handler(event, context):
-    """Sample pure Lambda function
+    print(event)
+    s3 = boto3.client('s3')
+    s3.download_file('change-pinpoint-templates', event['message_template'], '/tmp/pinpoint_template.html')
+    with open ("/tmp/pinpoint_template.html", "r") as myfile:
+        data=myfile.readlines()
+    print(data[0])
+    pinpoint = boto3.client('pinpoint')
+    response = pinpoint.send_messages(
+            ApplicationId='c83228417e1e4619a61fabcfaef18b1a',
+            MessageRequest={
+                'Context': {
+                    'campaign_id': event['campaign_id'],
+                    'user_id': event['user_id']
+                },
+                'Addresses': {
+                    'formosa@amazon.com': {
+                        'ChannelType': 'EMAIL'
+                    }
+                },
+                'MessageConfiguration': {
+                    'EmailMessage': {
+                        'SimpleEmail': {
+                            'Subject': {
+                                'Data': 'Pinpoint Testing'
+                            },
+                            'HtmlPart':{
+                                'Data': data[0]
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    print(response)
 
-    Parameters
-    ----------
-    event: dict, required
-        API Gateway Lambda Proxy Input Format
-
-        Event doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-input-format
-
-    context: object, required
-        Lambda Context runtime methods and attributes
-
-        Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
-
-    Returns
-    ------
-    API Gateway Lambda Proxy Output Format: dict
-
-        Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
-    """
-
-    # try:
-    #     ip = requests.get("http://checkip.amazonaws.com/")
-    # except requests.RequestException as e:
-    #     # Send some context about this error to Lambda Logs
-    #     print(e)
-
-    #     raise e
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({
-            "message": "hello world",
-            # "location": ip.text.replace("\n", "")
-        }),
-    }
