@@ -24,9 +24,118 @@ Resources:
         Ref: EmailChannelAddress
       Identity:
         Ref: EmailChannelIdentityArn
+  AWSPinpointEventStream:
+    Type: AWS::Pinpoint::EventStream
+    Properties:
+      ApplicationId:
+        Ref: AWSPinpointApplication
+      DestinationStreamArn:
+        Fn::GetAtt:
+        - PinpointKinesisStream
+        - Arn
+      RoleArn:
+        Fn::GetAtt:
+        - PublishEventStreamIamRole
+        - Arn
+  EmailTemplatesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+  PublishEventStreamIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - pinpoint.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: pinpoint_kinesis_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - kinesis:PutRecords
+            - kinesis:DescribeStream
+            Resource:
+              Fn::GetAtt:
+              - PinpointKinesisStream
+              - Arn
+  SendEmailFunctionIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: pinpoint_s3_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:GetObject
+            Resource:
+            - Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - Ref: EmailTemplatesBucket
+                - /*
+      - PolicyName: pinpoint_mobiletargeting_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - mobiletargeting:SendMessages
+            Resource:
+            - Fn::Join:
+              - ''
+              - - 'arn:aws:mobiletargeting:'
+                - Ref: AWS::Region
+                - ':'
+                - Ref: AWS::AccountId
+                - :apps/
+                - Ref: AWSPinpointApplication
+                - /messages
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://aws-pinpoint-demo-able/c79d432b4ae303e88203a99fab88d594
+      Role:
+        Fn::GetAtt:
+        - SendEmailFunctionIamRole
+        - Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          TEMPLATE_BUCKET:
+            Ref: EmailTemplatesBucket
+          APPLICATION_ID:
+            Ref: AWSPinpointApplication
+  PinpointKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      ShardCount: 1
 Outputs:
   AWSPinpointApplication:
-    Description: API Gateway endpoint URL for Prod stage for Hello World function
+    Description: The Pinpoint Application
     Value:
       Fn::GetAtt:
       - AWSPinpointApplication
