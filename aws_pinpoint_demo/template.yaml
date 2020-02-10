@@ -61,8 +61,46 @@ Resources:
                     - kinesis:PutRecords
                     - kinesis:DescribeStream
                     Resource: !GetAtt PinpointKinesisStream.Arn
+  
+  ProcessEventStreamFunctionIAMRole:
+      Type: AWS::IAM::Role
+      Properties:
+          AssumeRolePolicyDocument:
+              Version: 2012-10-17
+              Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                  - 'lambda.amazonaws.com'
+                Action:
+                  - 'sts:AssumeRole'
+          ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole       
+          Policies:
+          - PolicyName: lambda_kinesis_access
+            PolicyDocument:
+                  Version: 2012-10-17
+                  Statement:
+                    - Effect: Allow
+                      Action:
+                      - kinesis:GetRecords
+                      - kinesis:GetShardIterator
+                      - kinesis:DescribeStream
+                      - kinesis:ListStreams
+                      Resource: !GetAtt PinpointKinesisStream.Arn
+          - PolicyName: lambda_sqs_access
+            PolicyDocument:
+                  Version: 2012-10-17
+                  Statement:
+                    - Effect: Allow
+                      Action:
+                      - sqs:SendMessage
+                      Resource: 
+                      - !GetAtt EmailQueue.Arn
+                      - !GetAtt SMSQueue.Arn
+                      - !GetAtt CatchAllQueue.Arn
                     
-  SendEmailFunctionIamRole:
+  SendMessagesFunctionIamRole:
       Type: AWS::IAM::Role
       Properties:
           AssumeRolePolicyDocument:
@@ -111,7 +149,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: send_email_message/
-      Role: !GetAtt SendEmailFunctionIamRole.Arn
+      Role: !GetAtt SendMessagesFunctionIamRole.Arn
       Handler: app.lambda_handler
       Runtime: python3.7
       Environment:
@@ -119,11 +157,143 @@ Resources:
               TEMPLATE_BUCKET: !Ref EmailTemplatesBucket
               APPLICATION_ID: !Ref AWSPinpointApplication
   
+  SendSMSFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: send_sms_message/
+      Role: !GetAtt SendMessagesFunctionIamRole.Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+          Variables:
+              APPLICATION_ID: !Ref AWSPinpointApplication
+  
+  ProcessEventStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: process_event_stream/
+      Role: !GetAtt ProcessEventStreamFunctionIAMRole.Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+          Variables:
+              EMAIL_QUEUE: !Ref EmailQueue
+              SMS_QUEUE: !Ref SMSQueue
+              CATCH_ALL_QUEUE: !Ref CatchAllQueue
+      Events:
+        Stream:
+          Type: Kinesis
+          Properties:
+            Stream: !GetAtt PinpointKinesisStream.Arn
+            BatchSize: 1
+            StartingPosition: LATEST
+              
   PinpointKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
       ShardCount: 1
-      
+  
+  EmailQueue:
+    Type: AWS::SQS::Queue
+    
+  SMSQueue:
+    Type: AWS::SQS::Queue
+    
+  CatchAllQueue:
+    Type: AWS::SQS::Queue
+    
+  CampaignStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: "campaign_id"
+          AttributeType: "S"
+        -
+          AttributeName: "user_id"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "campaign_id"
+          KeyType: "HASH"
+        -
+          AttributeName: "user_id"
+          KeyType: "RANGE"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+    
+  ProcessQueuesFunctionIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+        AssumeRolePolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                  - 'lambda.amazonaws.com'
+                Action:
+                  - 'sts:AssumeRole'
+        Policies:
+        - PolicyName: lambda_dynamodb_access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                Resource: !GetAtt CampaignStatusTable.Arn
+        - PolicyName: lambda_sqs_access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: 
+                  - !GetAtt EmailQueue.Arn
+                  - !GetAtt SMSQueue.Arn
+                
+  ProcessEmailQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: process_email_queue/
+      Role: !GetAtt ProcessQueuesFunctionIAMRole.Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+          Variables:
+            CAMPAIGN_STATUS_TABLE: !Ref CampaignStatusTable
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EmailQueue.Arn
+            BatchSize: 1
+    
+  ProcessSMSQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: process_sms_queue/
+      Role: !GetAtt ProcessQueuesFunctionIAMRole.Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+          Variables:
+            CAMPAIGN_STATUS_TABLE: !Ref CampaignStatusTable
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SMSQueue.Arn
+            BatchSize: 1
+            
 Outputs:
 
   AWSPinpointApplication:

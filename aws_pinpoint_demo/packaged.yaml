@@ -69,7 +69,53 @@ Resources:
               Fn::GetAtt:
               - PinpointKinesisStream
               - Arn
-  SendEmailFunctionIamRole:
+  ProcessEventStreamFunctionIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: lambda_kinesis_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - kinesis:GetRecords
+            - kinesis:GetShardIterator
+            - kinesis:DescribeStream
+            - kinesis:ListStreams
+            Resource:
+              Fn::GetAtt:
+              - PinpointKinesisStream
+              - Arn
+      - PolicyName: lambda_sqs_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - sqs:SendMessage
+            Resource:
+            - Fn::GetAtt:
+              - EmailQueue
+              - Arn
+            - Fn::GetAtt:
+              - SMSQueue
+              - Arn
+            - Fn::GetAtt:
+              - CatchAllQueue
+              - Arn
+  SendMessagesFunctionIamRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -119,7 +165,7 @@ Resources:
       CodeUri: s3://aws-pinpoint-demo-able/c79d432b4ae303e88203a99fab88d594
       Role:
         Fn::GetAtt:
-        - SendEmailFunctionIamRole
+        - SendMessagesFunctionIamRole
         - Arn
       Handler: app.lambda_handler
       Runtime: python3.7
@@ -129,10 +175,163 @@ Resources:
             Ref: EmailTemplatesBucket
           APPLICATION_ID:
             Ref: AWSPinpointApplication
+  SendSMSFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://aws-pinpoint-demo-able/459066e629f365a06e4f5f545337f319
+      Role:
+        Fn::GetAtt:
+        - SendMessagesFunctionIamRole
+        - Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          APPLICATION_ID:
+            Ref: AWSPinpointApplication
+  ProcessEventStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://aws-pinpoint-demo-able/0229a6ad04eaa1b28868ae8825eaa94b
+      Role:
+        Fn::GetAtt:
+        - ProcessEventStreamFunctionIAMRole
+        - Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          EMAIL_QUEUE:
+            Ref: EmailQueue
+          SMS_QUEUE:
+            Ref: SMSQueue
+          CATCH_ALL_QUEUE:
+            Ref: CatchAllQueue
+      Events:
+        Stream:
+          Type: Kinesis
+          Properties:
+            Stream:
+              Fn::GetAtt:
+              - PinpointKinesisStream
+              - Arn
+            BatchSize: 1
+            StartingPosition: LATEST
   PinpointKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
       ShardCount: 1
+  EmailQueue:
+    Type: AWS::SQS::Queue
+  SMSQueue:
+    Type: AWS::SQS::Queue
+  CatchAllQueue:
+    Type: AWS::SQS::Queue
+  CampaignStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: campaign_id
+        AttributeType: S
+      - AttributeName: user_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: campaign_id
+        KeyType: HASH
+      - AttributeName: user_id
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+  ProcessQueuesFunctionIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: lambda_dynamodb_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:Scan
+            - dynamodb:Query
+            Resource:
+              Fn::GetAtt:
+              - CampaignStatusTable
+              - Arn
+      - PolicyName: lambda_sqs_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+            - Fn::GetAtt:
+              - EmailQueue
+              - Arn
+            - Fn::GetAtt:
+              - SMSQueue
+              - Arn
+  ProcessEmailQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://aws-pinpoint-demo-able/d0143ee0d1acb1e7739c57645f25bc74
+      Role:
+        Fn::GetAtt:
+        - ProcessQueuesFunctionIAMRole
+        - Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          CAMPAIGN_STATUS_TABLE:
+            Ref: CampaignStatusTable
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - EmailQueue
+              - Arn
+            BatchSize: 1
+  ProcessSMSQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://aws-pinpoint-demo-able/17b8ee6fbb67285a54916d555c1d6331
+      Role:
+        Fn::GetAtt:
+        - ProcessQueuesFunctionIAMRole
+        - Arn
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          CAMPAIGN_STATUS_TABLE:
+            Ref: CampaignStatusTable
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - SMSQueue
+              - Arn
+            BatchSize: 1
 Outputs:
   AWSPinpointApplication:
     Description: The Pinpoint Application
