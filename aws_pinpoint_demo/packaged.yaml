@@ -127,6 +127,8 @@ Resources:
             - lambda.amazonaws.com
           Action:
           - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
       - PolicyName: pinpoint_s3_access
         PolicyDocument:
@@ -332,6 +334,133 @@ Resources:
               - SMSQueue
               - Arn
             BatchSize: 1
+  AWSPinpointDemoAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: aws_pinpoint_demo
+  MessagesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ParentId:
+        Fn::GetAtt:
+        - AWSPinpointDemoAPI
+        - RootResourceId
+      PathPart: messages
+  EmailResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ParentId:
+        Ref: MessagesResource
+      PathPart: email
+  SMSResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ParentId:
+        Ref: MessagesResource
+      PathPart: sms
+  StatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ParentId:
+        Ref: MessagesResource
+      PathPart: status
+  AWSPinpointDemoAPIIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Policies:
+      - PolicyName: email_function_api_access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            Resource:
+            - Fn::GetAtt:
+              - SendEmailFunction
+              - Arn
+            - Fn::GetAtt:
+              - SendSMSFunction
+              - Arn
+  EmailPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ResourceId:
+        Ref: EmailResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+      - StatusCode: 200
+      Integration:
+        Type: AWS
+        Credentials:
+          Fn::GetAtt:
+          - AWSPinpointDemoAPIIAMRole
+          - Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+        - StatusCode: 200
+        Uri:
+          Fn::Join:
+          - ''
+          - - 'arn:aws:apigateway:'
+            - Ref: AWS::Region
+            - :lambda:path/2015-03-31/functions/
+            - Fn::GetAtt:
+              - SendEmailFunction
+              - Arn
+            - /invocations
+  SMSPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: AWSPinpointDemoAPI
+      ResourceId:
+        Ref: SMSResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+      - StatusCode: 200
+      Integration:
+        Type: AWS
+        Credentials:
+          Fn::GetAtt:
+          - AWSPinpointDemoAPIIAMRole
+          - Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+        - StatusCode: 200
+        Uri:
+          Fn::Join:
+          - ''
+          - - 'arn:aws:apigateway:'
+            - Ref: AWS::Region
+            - :lambda:path/2015-03-31/functions/
+            - Fn::GetAtt:
+              - SendSMSFunction
+              - Arn
+            - /invocations
 Outputs:
   AWSPinpointApplication:
     Description: The Pinpoint Application
